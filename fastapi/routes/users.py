@@ -1,61 +1,112 @@
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
-from database import *
+from database import (
+    connect_db, disconnect_db,
+    insert_user, get_user, get_user_by_id,
+    get_user_by_email, update_user as update_user_db,
+    delete_user as delete_user_db,
+    get_user_by_identifier_and_password,   # <-- import the new helper
+)
 
 router = APIRouter()
 
-# Pydantic model for user creation
 class UserCreate(BaseModel):
     username: str
     password_hash: str
     email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    tel: Optional[str] = None
 
-# Pydantic model for user update
 class UserUpdate(BaseModel):
-    username: Optional[str]
-    password_hash: Optional[str]
-    email: Optional[str]
+    username: Optional[str] = None
+    password_hash: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    tel: Optional[str] = None
 
-# Pydantic model for user response
 class User(BaseModel):
     user_id: int
     username: str
     password_hash: str
     email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    tel: Optional[str] = None
     created_at: datetime
 
+# NEW: login payload supports username OR email via `identifier`
+class UserLogin(BaseModel):
+    identifier: str     # username OR email
+    password_hash: str
 
-# Endpoint to create a new user
-@router.post("/users/", response_model=User)
+async def ensure_db():
+    await connect_db()
+
+@router.on_event("startup")
+async def _startup():
+    await connect_db()
+
+@router.on_event("shutdown")
+async def _shutdown():
+    await disconnect_db()
+
+@router.post("/users/create", response_model=User, dependencies=[Depends(ensure_db)])
 async def create_user(user: UserCreate):
-    result = await insert_user(user.username, user.password_hash, user.email)
+    existing_user = await get_user(user.username)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    result = await insert_user(
+        user.username, user.password_hash, user.email,
+        user.first_name, user.last_name, user.tel
+    )
     if result is None:
         raise HTTPException(status_code=400, detail="Error creating user")
     return result
 
-# Endpoint to get a user by user_id
-@router.get("/users/{user_id}", response_model=User)
+@router.get("/users/{user_id}", response_model=User, dependencies=[Depends(ensure_db)])
 async def read_user(user_id: int):
-    result = await get_user(user_id)
+    result = await get_user_by_id(user_id)
     if result is None:
         raise HTTPException(status_code=404, detail="User not found")
     return result
 
-# Endpoint to update a user
-@router.put("/users/{user_id}", response_model=User)
+@router.put("/users/{user_id}", response_model=User, dependencies=[Depends(ensure_db)])
 async def update_user_endpoint(user_id: int, user: UserUpdate):
-    result = await update_user(user_id, user.username, user.password_hash, user.email)
-    if result is None:
+    current = await get_user_by_id(user_id)
+    if current is None:
         raise HTTPException(status_code=404, detail="User not found")
+    username = user.username if user.username is not None else current["username"]
+    password_hash = user.password_hash if user.password_hash is not None else current["password_hash"]
+    email = user.email if user.email is not None else current["email"]
+    first_name = user.first_name if user.first_name is not None else current["first_name"]
+    last_name = user.last_name if user.last_name is not None else current["last_name"]
+    tel = user.tel if user.tel is not None else current["tel"]
+    result = await update_user_db(user_id, username, password_hash, email, first_name, last_name, tel)
     return result
 
-# Endpoint to delete a user
-@router.delete("/users/{user_id}")
+@router.delete("/users/{user_id}", dependencies=[Depends(ensure_db)])
 async def delete_user_endpoint(user_id: int):
-    result = await delete_user(user_id)
+    result = await delete_user_db(user_id)
     if result is None:
         raise HTTPException(status_code=404, detail="User not found")
     return {"detail": "User deleted"}
 
+# UPDATED: login supports username OR email via `identifier`
+@router.post("/users/login", dependencies=[Depends(ensure_db)])
+async def login_user(payload: UserLogin):
+    db_user = await get_user_by_identifier_and_password(payload.identifier, payload.password_hash)
+    if db_user is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return {
+        "user_id": db_user["user_id"],
+        "username": db_user["username"],
+        "email": db_user["email"],
+        "first_name": db_user["first_name"],
+        "last_name": db_user["last_name"],
+        "tel": db_user["tel"],
+        "created_at": db_user["created_at"],
+    }

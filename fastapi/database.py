@@ -66,6 +66,26 @@ async def get_user_by_identifier_and_password(identifier: str, password_hash: st
     """
     return await database.fetch_one(query=query, values={"identifier": identifier, "password_hash": password_hash})
 
+async def insert_pdf(user_id: int, name: str, file_path: str):
+    query = """
+    INSERT INTO pdf_files (user_id, name, file_path)
+    VALUES (:user_id, :name, :file_path)
+    RETURNING id, user_id, name, file_path, uploaded_at
+    """
+    values = {"user_id": user_id, "name": name, "file_path": file_path}
+    return await database.fetch_one(query=query, values=values)
+
+async def get_recent_pdfs(user_id: int, limit: int = 10):
+    query = """
+    SELECT id, name, file_path, uploaded_at
+    FROM pdf_files
+    WHERE user_id = :user_id
+    ORDER BY uploaded_at DESC
+    LIMIT :limit
+    """
+    return await database.fetch_all(query=query, values={"user_id": user_id, "limit": limit})
+
+
 async def update_user(
     user_id: int,
     username: str,

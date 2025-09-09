@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import {
   Box,
   Container,
@@ -13,17 +13,62 @@ import {
 
 export default function DashboardPage() {
   const inputRef = useRef(null);
-  const [recent, setRecent] = useState([
-    "Week_3_Notes.pdf",
-    "Signals_Lab1.pdf",
-    "AI_Outline.pdf",
-  ]);
+  const [recent, setRecent] = useState([]); // [{id,name,file_path,uploaded_at}]
+  const [pdfName, setPdfName] = useState("");
+  const [userId] = useState(1); // later: replace with logged-in user id
+
+  // NEW: selection state for Recent PDF (single-select)
+  const [selectedIds, setSelectedIds] = useState([]);
+  const toggleSelect = (id) =>
+    setSelectedIds((prev) => (prev[0] === id ? [] : [id]));
+
+  const fetchRecent = async () => {
+    try {
+      const res = await fetch(`/api/files/recent/${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRecent(data);
+      } else {
+        console.error("Failed to load recent files");
+      }
+    } catch (e) {
+      console.error("Error loading recent files:", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecent();
+  }, []);
 
   const onPick = () => inputRef.current?.click();
-  const onFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setRecent((r) => [f.name, ...r].slice(0, 10));
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("user_id", String(userId));
+    formData.append("name", pdfName || file.name);
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/files/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        setPdfName("");
+        await fetchRecent(); // refresh list from server
+      } else {
+        console.error("Upload failed");
+      }
+    } catch (err) {
+      console.error("Error uploading file:", err);
+    } finally {
+      // reset the file input so picking the same file again re-triggers onChange
+      if (inputRef.current) inputRef.current.value = "";
+    }
   };
 
   return (
@@ -32,7 +77,7 @@ export default function DashboardPage() {
       <Box
         sx={{
           height: { xs: 220, md: 320 },
-          backgroundImage: `url('/hero-pears.jpg'), linear-gradient(180deg,#ddd,#ccc)`,
+          backgroundImage: `url('/assets/hero-pears.jpg')`,
           backgroundSize: "cover",
           backgroundPosition: "center",
           position: "relative",
@@ -62,6 +107,22 @@ export default function DashboardPage() {
         <Grid container spacing={3} sx={{ mb: { xs: 4, md: 6 } }}>
           {/* Upload box */}
           <Grid item xs={12} md={7}>
+            {/* PDF name input */}
+            <Box sx={{ mb: 2 }}>
+              <input
+                type="text"
+                placeholder="Document name"
+                value={pdfName}
+                onChange={(e) => setPdfName(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  borderRadius: "4px",
+                  border: "1px solid #ccc",
+                }}
+              />
+            </Box>
+
             <Paper
               variant="outlined"
               sx={{
@@ -112,20 +173,64 @@ export default function DashboardPage() {
                 overflow: "auto",
                 borderRadius: 2,
                 "&::-webkit-scrollbar": { width: 6 },
-                "&::-webkit-scrollbar-thumb": { bgcolor: "#d1cfe1", borderRadius: 8 },
+                "&::-webkit-scrollbar-thumb": {
+                  bgcolor: "#d1cfe1",
+                  borderRadius: 8,
+                },
               }}
             >
               <List dense disablePadding sx={{ py: 0 }}>
-                {recent.map((name, i) => (
-                  <ListItem key={name + i} sx={{ px: 1.5, py: 1 }}>
+                {recent.map((item) => {
+                  const isSelected = selectedIds.includes(item.id);
+                  return (
+                    <ListItem
+                      key={item.id}
+                      button
+                      onClick={() => toggleSelect(item.id)}
+                      selected={isSelected}
+                      sx={{
+                        px: 1.5,
+                        py: 1,
+                        borderLeft: isSelected
+                          ? "3px solid"
+                          : "3px solid transparent",
+                        borderColor: isSelected ? "primary.main" : "transparent",
+                        bgcolor: isSelected ? "action.selected" : "inherit",
+                      }}
+                    >
+                      <ListItemText
+                        primaryTypographyProps={{
+                          noWrap: true,
+                          fontSize: 14,
+                          fontWeight: isSelected ? 700 : 400,
+                        }}
+                        secondaryTypographyProps={{ fontSize: 12 }}
+                        primary={
+                          <a
+                            href={`/${item.file_path}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ textDecoration: "none", color: "inherit" }}
+                            onClick={(e) => e.stopPropagation()}
+                            title={item.name}
+                          >
+                            {item.name}
+                          </a>
+                        }
+                        secondary="PDF"
+                      />
+                    </ListItem>
+                  );
+                })}
+                {recent.length === 0 && (
+                  <ListItem sx={{ px: 1.5, py: 1 }}>
                     <ListItemText
-                      primaryTypographyProps={{ noWrap: true, fontSize: 14 }}
-                      secondaryTypographyProps={{ fontSize: 12 }}
-                      primary={name}
-                      secondary="PDF"
+                      primaryTypographyProps={{ fontSize: 14 }}
+                      primary="No files yet"
+                      secondary="Upload a PDF to get started"
                     />
                   </ListItem>
-                ))}
+                )}
               </List>
             </Paper>
           </Grid>
@@ -141,11 +246,7 @@ export default function DashboardPage() {
 
         <Grid container spacing={3} justifyContent="center">
           <Grid item xs={12} sm={6} md={5}>
-            <Box
-              component="a"
-              href="/tasks/summarize"
-              sx={{ textDecoration: "none" }}
-            >
+            <Box component="a" href="/tasks/summarize" sx={{ textDecoration: "none" }}>
               <Paper
                 elevation={0}
                 sx={{
@@ -156,12 +257,7 @@ export default function DashboardPage() {
                   ":hover": { transform: "translateY(-2px)" },
                 }}
               >
-                <Box
-                  component="img"
-                  src="/task-1.jpg"
-                  alt="Summarize"
-                  sx={{ width: "100%", display: "block" }}
-                />
+                <Box component="img" src="/assets/task-1.jpg" alt="Summarize" sx={{ width: "100%", display: "block" }} />
                 <Box sx={{ px: 2, py: 1.25 }}>
                   <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
                     Summarize your materials
@@ -183,12 +279,7 @@ export default function DashboardPage() {
                   ":hover": { transform: "translateY(-2px)" },
                 }}
               >
-                <Box
-                  component="img"
-                  src="/task-2.jpg"
-                  alt="Quiz"
-                  sx={{ width: "100%", display: "block" }}
-                />
+                <Box component="img" src="/assets/task-2.jpg" alt="Quiz" sx={{ width: "100%", display: "block" }} />
                 <Box sx={{ px: 2, py: 1.25 }}>
                   <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
                     Make Quiz
@@ -199,11 +290,7 @@ export default function DashboardPage() {
           </Grid>
 
           <Grid item xs={12} sm={8} md={6}>
-            <Box
-              component="a"
-              href="/tasks/flashcards"
-              sx={{ textDecoration: "none" }}
-            >
+            <Box component="a" href="/tasks/flashcards" sx={{ textDecoration: "none" }}>
               <Paper
                 elevation={0}
                 sx={{
@@ -214,12 +301,7 @@ export default function DashboardPage() {
                   ":hover": { transform: "translateY(-2px)" },
                 }}
               >
-                <Box
-                  component="img"
-                  src="/task-3.jpg"
-                  alt="Flashcards"
-                  sx={{ width: "100%", display: "block" }}
-                />
+                <Box component="img" src="/assets/task-3.jpg" alt="Flashcards" sx={{ width: "100%", display: "block" }} />
                 <Box sx={{ px: 2, py: 1.25 }}>
                   <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
                     Make flashcard

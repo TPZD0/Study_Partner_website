@@ -1,13 +1,18 @@
-from typing import Union
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from database import *
-from routes.users import router
-
+# main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from database import connect_db, disconnect_db
+from routes.files import router as files_router
 
 app = FastAPI()
 
-app.include_router(router, prefix="/api")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+)
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.on_event("startup")
 async def startup():
@@ -16,3 +21,5 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await disconnect_db()
+
+app.include_router(files_router, prefix="/api")

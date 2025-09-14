@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from database import connect_db, disconnect_db
 from routes.files import router as files_router
+from routes.users import router as users_router
+from routes.ai import router as ai_router
 
 app = FastAPI()
 
@@ -23,3 +25,5 @@ async def shutdown():
     await disconnect_db()
 
 app.include_router(files_router, prefix="/api")
+app.include_router(users_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
